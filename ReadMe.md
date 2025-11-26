@@ -19,7 +19,7 @@ This is a fork of One-Click Offer, props to the founder. I will continue to work
 ### Installation
 
 - Install [Tampermonkey](https://www.tampermonkey.net/)
-- [Open the script](https://github.com/EurekaEffect/instant-trade-offer/raw/main/offer_sender.user.js)
+- [Open the script](https://github.com/DaSimple619/instant-trade-offer/raw/main/offer_sender.user.js)
 - Click Install
 
 ### Usage
