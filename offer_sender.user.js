@@ -1,18 +1,18 @@
 // ==UserScript==
 // @name         Instant Trade Offer
-// @namespace    https://github.com/EurekaEffect/instant-trade-offer
-// @homepage     https://github.com/EurekaEffect
-// @version      1.3.2
+// @namespace    https://github.com/DaSimple619/instant-trade-offer
+// @version      1.4
 // @description  An enchanced version of One-Click Offer.
-// @author       Brom127
-// @updateURL    https://github.com/EurekaEffect/instant-trade-offer/raw/refs/heads/main/offer_sender.user.js
-// @downloadURL  https://github.com/EurekaEffect/instant-trade-offer/raw/refs/heads/main/offer_sender.user.js
+// @author       brom127
+// @author       forked from EurekaEffect
 // @match        *://backpack.tf/stats/*
 // @match        *://backpack.tf/classifieds*
 // @match        *://backpack.tf/u/*
 // @match        *://next.backpack.tf/*
+// @match        *://pricedb.io/*
+// @match        *://*.pricedb.io/*
 // @match        *://steamcommunity.com/tradeoffer/new*
-// @icon         data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚛️</text></svg>
+// @icon         data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🔧</text></svg>
 // @run-at       document-start
 // ==/UserScript==
 
@@ -234,6 +234,24 @@ async function main() {
                 btn_box.append(btn_clone);
             }
         }
+    } else if (location.hostname.includes("pricedb.io")) {
+        await awaitDocumentReady();
+        addInstantButtonsPriceDB();
+
+        // Watch for dynamically loaded listings (if the page uses AJAX)
+        // Throttle the observer to avoid excessive calls
+        let timeoutId;
+        const observer = new MutationObserver(() => {
+            clearTimeout(timeoutId);
+            timeoutId = setTimeout(() => {
+                addInstantButtonsPriceDB();
+            }, 500); // Wait 500ms after mutations stop
+        });
+
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true
+        });
     } else if (location.hostname === "steamcommunity.com" && location.pathname.startsWith("/tradeoffer/new")) {
         const params = new URLSearchParams(location.search);
         if (!params.has("tscript_price")) return;
@@ -304,6 +322,90 @@ async function main() {
 
         if (offer_id) { // Success
             window.close();
+        }
+    }
+}
+
+function addInstantButtonsPriceDB() {
+    const listingCards = document.querySelectorAll('.listing-card[data-listing]');
+
+    for (let card of listingCards) {
+        // Skip if already processed (check for our button)
+        if (card.querySelector('.instant-trade-btn')) continue;
+
+        try {
+            const listingData = JSON.parse(card.getAttribute('data-listing'));
+
+            // Skip if no trade URL
+            if (!listingData.trade_url) continue;
+
+            // Find the existing trade offer button
+            const existingBtn = card.querySelector('a.btn-success.btn-sm[href*="tradeoffer/new"]');
+            if (!existingBtn) continue;
+
+            // Extract item info
+            const item_name = listingData.item_name || '';
+            const asset_id = listingData.asset_id || '';
+            const price_keys = listingData.price_keys || 0;
+            const price_metal = listingData.price_metal || '0';
+
+            // Format price string (matches backpack.tf format)
+            let price_string = '';
+            const metal_num = parseFloat(price_metal) || 0;
+
+            if (price_keys > 0) {
+                price_string += price_keys + (price_keys === 1 ? ' key' : ' keys');
+                if (metal_num > 0) {
+                    price_string += ', ' + price_metal + ' ref';
+                }
+            } else if (metal_num > 0) {
+                price_string = price_metal + ' ref';
+            } else {
+                // Skip if no price
+                continue;
+            }
+
+            // Create instant trade button
+            const instantBtn = existingBtn.cloneNode(true);
+            instantBtn.classList.add('instant-trade-btn');
+            instantBtn.style.backgroundColor = btn_color;
+            instantBtn.style.borderColor = btn_color;
+
+            if (btn_text) {
+                instantBtn.setAttribute('title', btn_text);
+            }
+
+            // Update the button text - keep the SVG icon and replace text
+            const svgIcon = instantBtn.querySelector('svg');
+            const newText = btn_text || 'Instant Trade Offer';
+
+            // Clear content and rebuild with SVG + new text
+            instantBtn.innerHTML = '';
+            if (svgIcon) {
+                instantBtn.appendChild(svgIcon.cloneNode(true));
+            }
+            instantBtn.appendChild(document.createTextNode(' ' + newText));
+
+            // Build URL with query parameters
+            const tradeUrl = new URL(listingData.trade_url);
+            tradeUrl.searchParams.set('tscript_id', asset_id);
+            tradeUrl.searchParams.set('tscript_price', price_string);
+            tradeUrl.searchParams.set('tscript_name', item_name);
+            // Token is already in the URL, keep it
+            if (!tradeUrl.searchParams.get('token') && listingData.trade_url.includes('token=')) {
+                const tokenMatch = listingData.trade_url.match(/token=([^&]+)/);
+                if (tokenMatch) {
+                    tradeUrl.searchParams.set('token', tokenMatch[1]);
+                }
+            }
+
+            instantBtn.href = tradeUrl.toString();
+
+            // Insert button in the same container as existing button (appears below it in the grid)
+            existingBtn.parentNode.appendChild(instantBtn);
+
+        } catch (e) {
+            console.error('Error processing listing:', e);
         }
     }
 }
@@ -544,6 +646,21 @@ async function sendOffer(items_to_give, items_to_receive) {
     }
 }
 
+/**
+ * Normalize to remove any of the following prefixes: "Taunt: ", "The"
+ * @param {String} name
+ * @returns
+ */
+function normalizeName(name) {
+    const prefixes = ["Taunt: ", "The "];
+    for (const prefix of prefixes) {
+        if (name.startsWith(prefix)) {
+            name = name.substring(prefix.length);
+        }
+    }
+    return name;
+}
+
 function nameFromItem(item) {
     let name = item.market_hash_name;
 
@@ -568,21 +685,6 @@ function nameFromItem(item) {
     return name;
 }
 
-/**
- * Normalize to remove any of the following prefixes: "Taunt: ", "The"
- * @param {String} name
- * @returns
- */
-function normalizeName(name) {
-    const prefixes = ["Taunt: ", "The "];
-    for (const prefix of prefixes) {
-        if (name.startsWith(prefix)) {
-            name = name.substring(prefix.length);
-        }
-    }
-    return name;
-}
-
 function toTradeOfferItem(id) {
     return {
         appid: 440, contextid: "2", amount: 1, assetid: id,
@@ -590,6 +692,7 @@ function toTradeOfferItem(id) {
 }
 
 function toCurrencyTypes(currency_string, is_buy_listing) {
+    // Handle format like "7.00 ref" or "2 keys, 5.00 ref" or just "2 keys"
     const match = currency_string.match(/^(\d+ keys?,? ?)?(\d+(?:\.\d+)? ref)?$/);
     if (!match) return throwError("Could not parse currency " + currency_string);
 
@@ -774,3 +877,4 @@ function throwError(err) {
     window.alert(pre_string + err);
     throw err;
 }
+
